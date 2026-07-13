@@ -9,11 +9,13 @@ Design decisions:
 
 import os
 import time
+import threading
 import requests
 
 # ────────────────────────────────────────────────────────────────────
-# Rate limiting
+# Rate limiting (thread-safe — multiple webhook requests can run in parallel)
 # ────────────────────────────────────────────────────────────────────
+_rate_lock = threading.Lock()
 _last_send_ts: float = 0.0
 RATE_LIMIT_DELAY: float = 1.0  # seconds between sends
 
@@ -21,10 +23,11 @@ RATE_LIMIT_DELAY: float = 1.0  # seconds between sends
 def _rate_limit():
     """Sleep if necessary to maintain the minimum delay between sends."""
     global _last_send_ts
-    elapsed = time.time() - _last_send_ts
-    if elapsed < RATE_LIMIT_DELAY:
-        time.sleep(RATE_LIMIT_DELAY - elapsed)
-    _last_send_ts = time.time()
+    with _rate_lock:
+        elapsed = time.time() - _last_send_ts
+        if elapsed < RATE_LIMIT_DELAY:
+            time.sleep(RATE_LIMIT_DELAY - elapsed)
+        _last_send_ts = time.time()
 
 
 # ────────────────────────────────────────────────────────────────────

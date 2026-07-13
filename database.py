@@ -10,6 +10,7 @@ import json
 import os
 import secrets
 import psycopg2
+from psycopg2 import pool
 
 from schema import (
     SENT_JOBS_DDL,
@@ -21,14 +22,35 @@ from schema import (
 
 
 # ────────────────────────────────────────────────────────────────────
-# Connection
+# Connection pool (thread-safe, reuses connections across requests)
 # ────────────────────────────────────────────────────────────────────
+_pool = None
+
+
+def _get_pool():
+    """Lazy-init a threaded connection pool."""
+    global _pool
+    if _pool is None:
+        url = os.environ.get("DATABASE_URL", "")
+        if not url:
+            raise RuntimeError("DATABASE_URL environment variable is not set.")
+        _pool = pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=url,
+        )
+    return _pool
+
+
 def get_connection():
-    """Return a psycopg2 connection using DATABASE_URL."""
-    url = os.environ.get("DATABASE_URL", "")
-    if not url:
-        raise RuntimeError("DATABASE_URL environment variable is not set.")
-    return psycopg2.connect(url)
+    """Return a psycopg2 connection from the pool."""
+    return _get_pool().getconn()
+
+
+def _release_connection(conn):
+    """Return a connection to the pool."""
+    if _pool and conn:
+        _pool.putconn(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -51,7 +73,7 @@ def init_db():
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -70,7 +92,7 @@ def is_job_new(job_id: str) -> bool:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def mark_job_as_sent(job_id: str, title: str, company: str, link: str = ""):
@@ -96,7 +118,7 @@ def mark_job_as_sent(job_id: str, title: str, company: str, link: str = ""):
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -141,7 +163,7 @@ def create_batch(job_dicts: list) -> str:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def pop_pending_jobs(batch_id: str, count: int = 5) -> list:
@@ -188,7 +210,7 @@ def pop_pending_jobs(batch_id: str, count: int = 5) -> list:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def has_pending_jobs(batch_id: str) -> bool:
@@ -211,7 +233,7 @@ def has_pending_jobs(batch_id: str) -> bool:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -247,7 +269,7 @@ def get_user_preference(chat_id: str) -> dict | None:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def upsert_user_preference(
@@ -309,7 +331,7 @@ def upsert_user_preference(
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_all_active_users() -> list:
@@ -345,7 +367,7 @@ def get_all_active_users() -> list:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -367,7 +389,7 @@ def create_user_digest(chat_id: str, job_dicts: list):
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def pop_user_digest_jobs(chat_id: str, count: int = 5) -> list:
@@ -408,7 +430,7 @@ def pop_user_digest_jobs(chat_id: str, count: int = 5) -> list:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def has_user_digest_jobs(chat_id: str) -> bool:
@@ -427,7 +449,7 @@ def has_user_digest_jobs(chat_id: str) -> bool:
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_user_last_digest(chat_id: str):
@@ -447,7 +469,7 @@ def get_user_last_digest(chat_id: str):
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def update_user_last_digest(chat_id: str):
@@ -470,7 +492,7 @@ def update_user_last_digest(chat_id: str):
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -513,4 +535,4 @@ def cleanup_expired_batches(max_age_hours: int = 48):
         if cur is not None:
             cur.close()
         if conn is not None:
-            conn.close()
+            _release_connection(conn)

@@ -22,9 +22,9 @@ That's it. You'll start receiving matching internships automatically.
 
 ## How It Works After Setup
 
-- Every 6 hours, the bot checks for new listings
+- Every 6hrs/12hrs/day(depending on your selection), the bot checks for new listings
 - If something matches your preferences, you get a DM with up to 5 listings
-- Tap **Show More** to see the next batch, or **Show All** to see everything at once
+- Tap **Show More** to see the next batch, or **Show All** to see everything at once. Due to server limitations, a maximum of 50 listings can be shown at a time.
 - Already-seen listings are never sent again
 - You can change your preferences anytime with `/settings`
 
