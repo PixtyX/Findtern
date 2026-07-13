@@ -9,6 +9,7 @@ Provides:
 """
 
 import os
+import re
 
 from database import (
     get_user_preference,
@@ -610,12 +611,12 @@ def handle_keyword_input(user_id: str, text: str) -> bool:
 # ════════════════════════════════════════════════════════════════════
 # Job matching
 # ════════════════════════════════════════════════════════════════════
-def matches_preferences(job: dict, prefs: dict) -> bool:
+def matches_preferences(job: dict, prefs: dict, skip_location: bool = False) -> bool:
     """
     Check if a job matches a user's preferences.
     A job matches if it satisfies ALL configured filters:
       - At least one department keyword OR custom keyword in title+description
-      - Location match (if locations are set)
+      - Location match (if locations are set and skip_location=False)
       - Remote preference (if not "any")
     """
     title = (job.get("job_title", "") or "").lower()
@@ -632,18 +633,44 @@ def matches_preferences(job: dict, prefs: dict) -> bool:
     remote_pref = prefs.get("remote_pref", "any")
 
     # ── Keyword matching (departments + custom) ──
+    # Use word-boundary matching to prevent "software" matching "accounting software"
+    def _word_match(keyword: str, text: str) -> bool:
+        """Check if keyword appears as a whole word/phrase in text."""
+        pattern = r'\b' + re.escape(keyword) + r'\b'
+        return bool(re.search(pattern, text))
+
     has_keyword_match = False
 
-    # Check department keywords
+    # Check department keywords — multi-signal approach
     for dept_code in depts:
         dept = DEPARTMENTS.get(dept_code)
-        if dept and any(kw in combined for kw in dept["keywords"]):
+        if not dept:
+            continue
+        kw_list = dept["keywords"]
+
+        # Signal 1: Any keyword in title → strong match
+        if any(_word_match(kw, title) for kw in kw_list):
             has_keyword_match = True
             break
 
-    # Check custom keywords
+        # Signal 2: Multi-word keyword in description → specific enough
+        multi_word_kws = [kw for kw in kw_list if " " in kw]
+        if any(_word_match(kw, desc) for kw in multi_word_kws):
+            has_keyword_match = True
+            break
+
+        # Signal 3: 2+ single-word keywords in description → likely relevant
+        single_kws = [kw for kw in kw_list if " " not in kw]
+        desc_matches = sum(1 for kw in single_kws if _word_match(kw, desc))
+        if desc_matches >= 2:
+            has_keyword_match = True
+            break
+
+    # Check custom keywords — same logic
     if not has_keyword_match and custom_kw:
-        if any(kw in combined for kw in custom_kw):
+        if any(_word_match(kw, title) for kw in custom_kw):
+            has_keyword_match = True
+        elif any(_word_match(kw, desc) for kw in custom_kw):
             has_keyword_match = True
 
     # If no departments AND no custom keywords selected, match everything
@@ -654,7 +681,7 @@ def matches_preferences(job: dict, prefs: dict) -> bool:
         return False
 
     # ── Location matching ──
-    if locations:
+    if locations and not skip_location:
         location_match = False
         for loc_code in locations:
             loc = LOCATIONS.get(loc_code)

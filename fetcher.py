@@ -37,6 +37,60 @@ def fetch_internships_with_errors(query: str | None = None) -> tuple:
     return jobs, error
 
 
+def fetch_multi_query(queries: list[str]) -> tuple:
+    """
+    Run multiple queries, combine and deduplicate results.
+    Returns (jobs_list, error_string).
+    """
+    api_key = os.environ.get("RAPIDAPI_KEY", "")
+    if not api_key:
+        return [], "RAPIDAPI_KEY not set"
+
+    seen_ids = set()
+    all_jobs = []
+    last_error = ""
+
+    for base_url in JSEARCH_URLS:
+        host = base_url.split("//")[1].split("/")[0]
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": host,
+        }
+
+        for q in queries:
+            params = {"query": q, "page": "1", "num_pages": "2", "country": "my", "date_posted": "all"}
+            print(f"[fetcher] Multi-query ({host}): '{q}'")
+
+            try:
+                resp = requests.get(base_url, headers=headers, params=params, timeout=30)
+                if resp.status_code != 200:
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    break  # try next endpoint
+
+                payload = resp.json()
+                data = payload.get("data", [])
+                if isinstance(data, dict):
+                    data = data.get("jobs", data.get("results", []))
+
+                if isinstance(data, list):
+                    for job in data:
+                        jid = job.get("job_id", "")
+                        if jid and jid not in seen_ids:
+                            seen_ids.add(jid)
+                            all_jobs.append(job)
+                    print(f"[fetcher]   '{q}' → {len(data)} results")
+
+            except Exception as exc:
+                last_error = f"Exception: {exc}"
+                continue
+
+        if all_jobs:
+            break  # got results from this endpoint, skip others
+
+    print(f"[fetcher] Multi-query total: {len(all_jobs)} unique jobs")
+    return all_jobs, last_error if not all_jobs else ""
+
+
 def _fetch_jsearch(query: str | None) -> tuple:
     """Returns (jobs_list, error_string). error_string is '' on success."""
     api_key = os.environ.get("RAPIDAPI_KEY", "")

@@ -158,36 +158,82 @@ def _handle_search_now(user_id: str):
 
     send_dm(user_id, "🔍 <b>Searching for internships…</b>")
 
-    # Build a broad query — the fetcher will fall back to "internship Malaysia"
-    # if this returns nothing. All the real filtering happens in matches_preferences().
+    # Build targeted queries (max 5 to stay within API limits)
     from preferences import DEPARTMENTS, LOCATIONS
-    query_parts = ["internship"]
+    queries = []
 
-    # Add first location for better API results
+    # Primary location
+    primary_loc = "Malaysia"
     for loc_code in prefs.get("locations", []):
         loc = LOCATIONS.get(loc_code)
         if loc and loc.get("areas"):
-            query_parts.append(loc["areas"][0])  # e.g. "kuala lumpur"
+            primary_loc = loc["areas"][0]
             break
 
-    query = " ".join(query_parts)
-    print(f"[search] User {user_id}: query='{query}'")
+    # Get top department keyword (most specific one)
+    top_dept_keyword = None
+    for dept_code in prefs.get("departments", []):
+        dept = DEPARTMENTS.get(dept_code)
+        if dept and dept.get("keywords"):
+            # Prefer multi-word keywords (more specific)
+            multi = [k for k in dept["keywords"] if " " in k]
+            top_dept_keyword = multi[0] if multi else dept["keywords"][0]
+            break
 
-    # Fetch with error reporting
-    from fetcher import fetch_internships_with_errors
-    raw_jobs, fetch_error = fetch_internships_with_errors(query=query)
+    # Query 1: Department keyword + location (most targeted)
+    if top_dept_keyword:
+        queries.append(f"{top_dept_keyword} intern {primary_loc}")
+
+    # Query 2: Department keyword + Malaysia (broader location)
+    if top_dept_keyword:
+        queries.append(f"{top_dept_keyword} intern Malaysia")
+
+    # Query 3: Custom keywords if set
+    custom_kw = prefs.get("custom_keywords", [])
+    if custom_kw:
+        queries.append(f"{custom_kw[0]} intern {primary_loc}")
+
+    # Query 4: Broad internship + location
+    queries.append(f"internship {primary_loc}")
+
+    # Query 5: Broadest fallback
+    queries.append("internship Malaysia")
+
+    # Deduplicate
+    seen = set()
+    unique_queries = []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            unique_queries.append(q)
+
+    print(f"[search] User {user_id}: {len(unique_queries)} queries: {unique_queries}")
+
+    # Fetch with multi-query
+    from fetcher import fetch_multi_query
+    raw_jobs, fetch_error = fetch_multi_query(unique_queries)
 
     if not raw_jobs:
         send_dm(user_id,
             f"😕 <b>No internships found.</b>\n\n"
-            f"<b>Query:</b> <code>{escape_html(query)}</code>\n\n"
             f"<b>Error:</b> {escape_html(fetch_error)}\n\n"
-            "Check /settings to adjust your preferences."
+            "Try adding more departments or locations with /settings."
         )
         return
 
-    # Filter by preferences
+    # Filter by preferences — strict first, then relax location if few results
     matched = [job for job in raw_jobs if matches_preferences(job, prefs)]
+    print(f"[search] User {user_id}: {len(raw_jobs)} raw → {len(matched)} strict matches")
+
+    if len(matched) < 5:
+        # Relax: skip location filter, just match on keywords
+        relaxed = [job for job in raw_jobs if matches_preferences(job, prefs, skip_location=True)]
+        # Add relaxed results that aren't already in strict matches
+        strict_ids = {j.get("job_id") for j in matched}
+        for job in relaxed:
+            if job.get("job_id") not in strict_ids:
+                matched.append(job)
+        print(f"[search] User {user_id}: relaxed matching → {len(matched)} total")
 
     # Deduplicate against already-seen jobs
     new_matched = []
