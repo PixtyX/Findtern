@@ -173,40 +173,16 @@ def _handle_search_now(user_id: str):
     query = " ".join(query_parts)
     print(f"[search] User {user_id}: query='{query}'")
 
-    # Fetch from each source separately so we can report what happened
-    from fetcher import _fetch_jsearch, _fetch_adzuna
-
-    jsearch_jobs, jsearch_err = _fetch_jsearch(query)
-    adzuna_jobs, adzuna_err = _fetch_adzuna(query)
-
-    # Build status for the user — show actual errors
-    source_lines = []
-    if jsearch_err:
-        source_lines.append(f"JSearch: ⚠️ {jsearch_err}")
-    else:
-        source_lines.append(f"JSearch: {len(jsearch_jobs)} results")
-    if adzuna_err:
-        source_lines.append(f"Adzuna: ⚠️ {adzuna_err}")
-    else:
-        source_lines.append(f"Adzuna: {len(adzuna_jobs)} results")
-    print(f"[search] Sources — {'; '.join(source_lines)}")
-
-    # Combine and deduplicate
-    seen = set()
-    raw_jobs = []
-    for job in jsearch_jobs + adzuna_jobs:
-        key = f"{job.get('job_title', '').lower()}|{job.get('employer_name', '').lower()}"
-        if key not in seen:
-            seen.add(key)
-            raw_jobs.append(job)
+    # Fetch with error reporting
+    from fetcher import fetch_internships_with_errors
+    raw_jobs, fetch_error = fetch_internships_with_errors(query=query)
 
     if not raw_jobs:
-        status = "\n".join(f"  • {s}" for s in source_lines)
         send_dm(user_id,
             f"😕 <b>No internships found.</b>\n\n"
             f"<b>Query:</b> <code>{escape_html(query)}</code>\n\n"
-            f"<b>Source status:</b>\n{status}\n\n"
-            "Check /settings to adjust your preferences, or try again later."
+            f"<b>Error:</b> {escape_html(fetch_error)}\n\n"
+            "Check /settings to adjust your preferences."
         )
         return
 
