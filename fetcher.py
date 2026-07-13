@@ -11,7 +11,11 @@ Subscribe free at: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
 import os
 import requests
 
-JSEARCH_URL = "https://jsearch.p.rapidapi.com/search"
+# Try both JSearch endpoints — regular and Mega
+JSEARCH_URLS = [
+    "https://jsearch.p.rapidapi.com/search",
+    "https://jsearch-mega.p.rapidapi.com/search",
+]
 
 
 def fetch_internships(query: str | None = None) -> list:
@@ -39,46 +43,51 @@ def _fetch_jsearch(query: str | None) -> tuple:
     if not api_key:
         return [], "RAPIDAPI_KEY not set"
 
-    headers = {
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
-    }
-
     queries_to_try = [q for q in [query, "internship Malaysia"] if q]
     last_error = ""
 
-    for q in queries_to_try:
-        params = {"query": q, "page": "1", "num_pages": "1"}
-        print(f"[fetcher] JSearch trying: '{q}'")
+    # Try each JSearch endpoint (regular + mega)
+    for base_url in JSEARCH_URLS:
+        host = base_url.split("//")[1].split("/")[0]
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": host,
+        }
 
-        try:
-            resp = requests.get(JSEARCH_URL, headers=headers, params=params, timeout=30)
+        for q in queries_to_try:
+            params = {"query": q, "page": "1", "num_pages": "1"}
+            print(f"[fetcher] JSearch ({host}) trying: '{q}'")
 
-            if resp.status_code == 429:
-                return [], "JSearch 429 rate-limited"
+            try:
+                resp = requests.get(base_url, headers=headers, params=params, timeout=30)
 
-            if resp.status_code != 200:
-                body = resp.text[:300]
-                return [], f"JSearch HTTP {resp.status_code}: {body}"
+                if resp.status_code == 429:
+                    return [], "JSearch 429 rate-limited"
 
-            payload = resp.json()
-            data = payload.get("data", [])
+                if resp.status_code != 200:
+                    body = resp.text[:300]
+                    last_error = f"JSearch ({host}) HTTP {resp.status_code}: {body}"
+                    print(f"[fetcher] {last_error}")
+                    break  # try next endpoint, don't try more queries on this one
 
-            # JSearch changed format: data can be {"jobs": [...]} instead of [...]
-            if isinstance(data, dict):
-                data = data.get("jobs", data.get("results", []))
+                payload = resp.json()
+                data = payload.get("data", [])
 
-            if isinstance(data, list) and len(data) > 0:
-                print(f"[fetcher] JSearch got {len(data)} results for '{q}'")
-                return data, ""
+                # JSearch changed format: data can be {"jobs": [...]} instead of [...]
+                if isinstance(data, dict):
+                    data = data.get("jobs", data.get("results", []))
 
-            status_msg = payload.get("status", payload.get("message", "unknown"))
-            last_error = f"JSearch: 0 results (status: {status_msg})"
-            continue
+                if isinstance(data, list) and len(data) > 0:
+                    print(f"[fetcher] JSearch ({host}) got {len(data)} results for '{q}'")
+                    return data, ""
 
-        except Exception as exc:
-            last_error = f"JSearch exception: {exc}"
-            print(f"[fetcher] {last_error}")
-            continue
+                status_msg = payload.get("status", payload.get("message", "unknown"))
+                last_error = f"JSearch ({host}): 0 results (status: {status_msg})"
+                continue
 
-    return [], last_error or "JSearch: 0 results for all queries"
+            except Exception as exc:
+                last_error = f"JSearch ({host}) exception: {exc}"
+                print(f"[fetcher] {last_error}")
+                continue
+
+    return [], last_error or "JSearch: all endpoints failed"
