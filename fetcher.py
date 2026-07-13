@@ -33,14 +33,14 @@ def fetch_internships(query: str | None = None) -> list:
     all_jobs = []
 
     # Source 1: JSearch
-    jsearch_jobs = _fetch_jsearch(query)
+    jsearch_jobs, jsearch_err = _fetch_jsearch(query)
     all_jobs.extend(jsearch_jobs)
-    print(f"[fetcher] JSearch returned {len(jsearch_jobs)} jobs.")
+    print(f"[fetcher] JSearch: {len(jsearch_jobs)} jobs" + (f" ({jsearch_err})" if jsearch_err else ""))
 
     # Source 2: Adzuna
-    adzuna_jobs = _fetch_adzuna(query)
+    adzuna_jobs, adzuna_err = _fetch_adzuna(query)
     all_jobs.extend(adzuna_jobs)
-    print(f"[fetcher] Adzuna returned {len(adzuna_jobs)} jobs.")
+    print(f"[fetcher] Adzuna: {len(adzuna_jobs)} jobs" + (f" ({adzuna_err})" if adzuna_err else ""))
 
     # Deduplicate by title+company (different sources may have the same job)
     seen = set()
@@ -58,61 +58,68 @@ def fetch_internships(query: str | None = None) -> list:
 # ────────────────────────────────────────────────────────────────────
 # JSearch (RapidAPI)
 # ────────────────────────────────────────────────────────────────────
-def _fetch_jsearch(query: str | None) -> list:
+def _fetch_jsearch(query: str | None) -> tuple:
+    """Returns (jobs_list, error_string). error_string is '' on success."""
     api_key = os.environ.get("RAPIDAPI_KEY", "")
     if not api_key:
-        print("[fetcher] RAPIDAPI_KEY missing — skipping JSearch.")
-        return []
+        return [], "RAPIDAPI_KEY not set"
 
     headers = {
         "X-RapidAPI-Key": api_key,
         "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
     }
 
-    # Try the specific query first, fall back to broad if empty
     queries_to_try = [q for q in [query, "internship Malaysia"] if q]
+    last_error = ""
     for q in queries_to_try:
-        params = {
-            "query": q,
-            "page": "1",
-            "num_pages": "1",
-        }
+        params = {"query": q, "page": "1", "num_pages": "1"}
         print(f"[fetcher] JSearch trying: '{q}'")
 
         try:
             resp = requests.get(JSEARCH_URL, headers=headers, params=params, timeout=30)
             if resp.status_code == 429:
-                print("[fetcher] JSearch 429 rate-limited.")
-                return []
+                return [], "JSearch 429 rate-limited"
             if resp.status_code != 200:
-                print(f"[fetcher] JSearch HTTP {resp.status_code}")
-                continue  # try next query
+                # Show actual error from API (redacting key)
+                body = resp.text[:200]
+                last_error = f"JSearch HTTP {resp.status_code}: {body}"
+                print(f"[fetcher] {last_error}")
+                continue
 
-            data = resp.json().get("data", [])
+            payload = resp.json()
+            data = payload.get("data", [])
             if isinstance(data, list) and len(data) > 0:
                 print(f"[fetcher] JSearch got {len(data)} results for '{q}'")
-                return data
+                return data, ""
+
+            # API returned OK but empty data — check for error message
+            if not data:
+                status_msg = payload.get("status", payload.get("message", "unknown"))
+                last_error = f"JSearch: 0 results (status: {status_msg})"
+                continue
 
         except Exception as exc:
-            print(f"[fetcher] JSearch error: {exc}")
+            last_error = f"JSearch exception: {exc}"
+            print(f"[fetcher] {last_error}")
             continue
 
-    return []
+    return [], last_error or "JSearch: 0 results for all queries"
 
 
 # ────────────────────────────────────────────────────────────────────
 # Adzuna (free API — covers JobStreet, Indeed, LinkedIn, etc.)
 # ────────────────────────────────────────────────────────────────────
-def _fetch_adzuna(query: str | None) -> list:
+def _fetch_adzuna(query: str | None) -> tuple:
+    """Returns (jobs_list, error_string). error_string is '' on success."""
     app_id = os.environ.get("ADZUNA_APP_ID", "")
     app_key = os.environ.get("ADZUNA_APP_KEY", "")
     if not app_id or not app_key:
-        print("[fetcher] ADZUNA_APP_ID/KEY missing — skipping Adzuna.")
-        return []
+        return [], "ADZUNA_APP_ID/KEY not set"
 
     # Try specific query first, fall back to broad
     queries_to_try = [q for q in [query, "internship"] if q]
 
+    last_error = ""
     for q in queries_to_try:
         params = {
             "app_id": app_id,
@@ -128,19 +135,20 @@ def _fetch_adzuna(query: str | None) -> list:
         try:
             resp = requests.get(ADZUNA_URL, params=params, timeout=30)
             if resp.status_code == 429:
-                print("[fetcher] Adzuna 429 rate-limited.")
-                return []
+                return [], "Adzuna 429 rate-limited"
             if resp.status_code != 200:
-                print(f"[fetcher] Adzuna HTTP {resp.status_code}")
+                body = resp.text[:200]
+                last_error = f"Adzuna HTTP {resp.status_code}: {body}"
+                print(f"[fetcher] {last_error}")
                 continue
 
             data = resp.json().get("results", [])
             if not isinstance(data, list) or len(data) == 0:
+                last_error = "Adzuna: 0 results"
                 continue
 
             print(f"[fetcher] Adzuna got {len(data)} results for '{q}'")
 
-            # Normalize Adzuna format → common format
             normalized = []
             for job in data:
                 loc = job.get("location", {})
@@ -154,10 +162,11 @@ def _fetch_adzuna(query: str | None) -> list:
                     "job_description": job.get("description", ""),
                     "job_apply_link": job.get("redirect_url", ""),
                 })
-            return normalized
+            return normalized, ""
 
         except Exception as exc:
-            print(f"[fetcher] Adzuna error: {exc}")
+            last_error = f"Adzuna exception: {exc}"
+            print(f"[fetcher] {last_error}")
             continue
 
-    return []
+    return [], last_error or "Adzuna: 0 results for all queries"

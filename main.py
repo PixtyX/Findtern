@@ -176,19 +176,19 @@ def _handle_search_now(user_id: str):
     # Fetch from each source separately so we can report what happened
     from fetcher import _fetch_jsearch, _fetch_adzuna
 
-    jsearch_jobs = _fetch_jsearch(query)
-    adzuna_jobs = _fetch_adzuna(query)
+    jsearch_jobs, jsearch_err = _fetch_jsearch(query)
+    adzuna_jobs, adzuna_err = _fetch_adzuna(query)
 
-    # Build status for the user
+    # Build status for the user — show actual errors
     source_lines = []
-    if os.environ.get("RAPIDAPI_KEY"):
+    if jsearch_err:
+        source_lines.append(f"JSearch: ⚠️ {jsearch_err}")
+    else:
         source_lines.append(f"JSearch: {len(jsearch_jobs)} results")
+    if adzuna_err:
+        source_lines.append(f"Adzuna: ⚠️ {adzuna_err}")
     else:
-        source_lines.append("JSearch: ⚠️ API key not configured")
-    if os.environ.get("ADZUNA_APP_ID") and os.environ.get("ADZUNA_APP_KEY"):
         source_lines.append(f"Adzuna: {len(adzuna_jobs)} results")
-    else:
-        source_lines.append("Adzuna: ⚠️ API key not configured")
     print(f"[search] Sources — {'; '.join(source_lines)}")
 
     # Combine and deduplicate
