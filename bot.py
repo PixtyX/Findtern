@@ -107,8 +107,6 @@ def _startup():
 
 def _register_webhook():
     """Tell Telegram where to send updates."""
-    import requests
-
     base_url = (
         os.environ.get("RENDER_EXTERNAL_URL")
         or os.environ.get("RAILWAY_PUBLIC_DOMAIN")
@@ -127,7 +125,7 @@ def _register_webhook():
 
     webhook_url = f"{base_url}/webhook/{WEBHOOK_SECRET}"
 
-    resp = requests.post(
+    resp = http_requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook",
         json={
             "url": webhook_url,
