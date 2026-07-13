@@ -130,6 +130,9 @@ def build_job_card(job: dict) -> str:
         f"<b>Company:</b> {company}",
         f"<b>Location:</b> {location}",
     ]
+    posted = job.get("job_posted_at", "")
+    if posted:
+        lines.append(f"<b>Posted:</b> {escape_html(posted)}")
     if link:
         lines.append(f'<a href="{link}">Apply Here</a>')
     return "\n".join(lines)
