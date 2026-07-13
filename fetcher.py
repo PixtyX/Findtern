@@ -57,17 +57,9 @@ def _fetch_jsearch(query: str | None) -> tuple:
             if resp.status_code == 429:
                 return [], "JSearch 429 rate-limited"
 
-            if resp.status_code == 404:
-                return [], "JSearch 404 — not subscribed. Go to rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch and click Subscribe (free)"
-
-            if resp.status_code == 403:
-                return [], "JSearch 403 — not subscribed. Go to rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch and click Subscribe (free)"
-
             if resp.status_code != 200:
-                body = resp.text[:200]
-                last_error = f"JSearch HTTP {resp.status_code}: {body}"
-                print(f"[fetcher] {last_error}")
-                continue
+                body = resp.text[:300]
+                return [], f"JSearch HTTP {resp.status_code}: {body}"
 
             payload = resp.json()
             data = payload.get("data", [])
