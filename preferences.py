@@ -23,7 +23,11 @@ from telegram import (
 # ────────────────────────────────────────────────────────────────────
 # Keyword entry state tracking
 # Maps user_id (str) → True when awaiting keyword input
+# Protected by a lock for thread-safe webhook access
 # ────────────────────────────────────────────────────────────────────
+import threading
+
+_pending_keyword_lock = threading.Lock()
 _pending_keyword_user: dict = {}
 
 # ────────────────────────────────────────────────────────────────────
@@ -517,7 +521,8 @@ def handle_settings_callback(cq_id: str, user_id: str, data: str) -> bool:
         keywords = list(prefs.get("custom_keywords", [])) if prefs else []
 
         if value == "add":
-            _pending_keyword_user[user_id] = True
+            with _pending_keyword_lock:
+                _pending_keyword_user[user_id] = True
             send_dm(user_id,
                 "<b>Add a Custom Keyword</b>\n\n"
                 "Type the keyword you want to match.\n"
@@ -555,13 +560,15 @@ def handle_keyword_input(user_id: str, text: str) -> bool:
     Check if user is in keyword-entry mode and process their input.
     Returns True if the message was consumed as keyword input.
     """
-    if user_id not in _pending_keyword_user:
-        return False
+    with _pending_keyword_lock:
+        if user_id not in _pending_keyword_user:
+            return False
 
     keyword = text.strip().lower()
 
     if keyword.startswith("/cancel"):
-        del _pending_keyword_user[user_id]
+        with _pending_keyword_lock:
+            _pending_keyword_user.pop(user_id, None)
         text_out, kb = build_settings_menu(user_id)
         send_dm(user_id, text_out, reply_markup=kb)
         return True
@@ -579,7 +586,8 @@ def handle_keyword_input(user_id: str, text: str) -> bool:
 
     keywords.append(keyword)
     upsert_user_preference(user_id, custom_keywords=keywords)
-    del _pending_keyword_user[user_id]
+    with _pending_keyword_lock:
+        _pending_keyword_user.pop(user_id, None)
 
     send_dm(user_id,
         f"✅ Added <code>{escape_html(keyword)}</code>!\n"

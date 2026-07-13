@@ -30,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests python-dotenv psycopg2-binary
 
-      # ---- Run the bot ----
+      # ---- Run the bot (job fetching + delivery only) ----
       - name: Run main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

@@ -1,10 +1,9 @@
 """
-telegram.py — Telegram Bot API client with rate limiting and callback handling.
+telegram.py — Telegram Bot API client with rate limiting.
 
 Design decisions:
   - HTML parse mode only (never Markdown — raw job descriptions break it)
   - 1-second delay between message sends to respect Telegram rate limits
-  - Callback query processing via getUpdates (no webhook server needed)
   - All HTML-unsafe characters are escaped before sending
 """
 
@@ -52,10 +51,6 @@ def _bot_url(method: str) -> str:
     return f"https://api.telegram.org/bot{token}/{method}"
 
 
-def _chat_id() -> str:
-    return os.environ.get("TELEGRAM_CHAT_ID", "")
-
-
 def _check_credentials() -> bool:
     """Return True if TELEGRAM_TOKEN is present."""
     token = os.environ.get("TELEGRAM_TOKEN", "")
@@ -68,41 +63,6 @@ def _check_credentials() -> bool:
 # ────────────────────────────────────────────────────────────────────
 # Message sending
 # ────────────────────────────────────────────────────────────────────
-def send_message(text: str, reply_markup: dict | None = None) -> bool:
-    """
-    Send an HTML-formatted message to the configured chat.
-    Kept for backward compatibility — prefer send_dm() for new code.
-    """
-    if not _check_credentials():
-        return False
-
-    _rate_limit()
-    token = os.environ.get("TELEGRAM_TOKEN", "")
-
-    payload = {
-        "chat_id": _chat_id(),
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-
-    try:
-        resp = requests.post(
-            _bot_url("sendMessage"), json=payload, timeout=15
-        )
-        if resp.status_code != 200:
-            # Redact token from URL before logging
-            safe_body = resp.text[:300].replace(token, "***") if token else resp.text[:300]
-            print(f"[telegram] sendMessage HTTP {resp.status_code}: {safe_body}")
-            return False
-        return True
-    except requests.exceptions.RequestException as exc:
-        print(f"[telegram] sendMessage failed: {exc}")
-        return False
-
-
 def send_dm(user_id: str, text: str, reply_markup: dict | None = None) -> bool:
     """
     Send a direct message to a specific user by their Telegram user/chat ID.
@@ -172,87 +132,8 @@ def build_job_card(job: dict) -> str:
     return "\n".join(lines)
 
 
-def build_summary_message(count: int, first_batch: list, batch_id: str) -> tuple:
-    """
-    Build the initial summary message + inline keyboard.
-    Enforces Telegram's 4096-char message limit.
-
-    Returns (message_text, reply_markup_dict).
-    """
-    MAX_MSG_LEN = 4096
-
-    header = (
-        f"📢 <b>{count} New Internship{'s' if count != 1 else ''} Found!</b>\n\n"
-        f"Here are the first {len(first_batch)}:\n"
-        "─────────────────\n"
-    )
-
-    cards = []
-    for job in first_batch:
-        cards.append(build_job_card(job))
-
-    footer = "\n─────────────────\n"
-
-    remaining = count - len(first_batch)
-    keyboard = None
-    if remaining > 0:
-        footer += f"\n📋 {remaining} more available. Tap below to see them."
-        keyboard = {
-            "inline_keyboard": [
-                [{"text": "📋 Show More", "callback_data": f"more:{batch_id}"}],
-                [{"text": "🔔 Show All", "callback_data": f"all:{batch_id}"}],
-            ]
-        }
-    else:
-        footer += "\n✅ That's all for this round!"
-
-    text = header + "\n\n".join(cards) + footer
-
-    # Guard: truncate if over Telegram's 4096-char limit
-    if len(text) > MAX_MSG_LEN:
-        text = text[: MAX_MSG_LEN - 20] + "\n\n… (truncated)"
-
-    return text, keyboard
-
-
-def build_next_batch_message(
-    batch: list, batch_id: str, total_remaining: int
-) -> tuple:
-    """
-    Build a "here are more jobs" message + inline keyboard.
-    Enforces Telegram's 4096-char message limit.
-
-    Returns (message_text, reply_markup_dict).
-    """
-    MAX_MSG_LEN = 4096
-
-    header = f"📋 <b>More Internships ({len(batch)}):</b>\n\n"
-    cards = [build_job_card(job) for job in batch]
-    footer = "\n─────────────────\n"
-
-    keyboard = None
-    if total_remaining > 0:
-        footer += f"\n📋 {total_remaining} more remaining."
-        keyboard = {
-            "inline_keyboard": [
-                [{"text": "📋 Show More", "callback_data": f"more:{batch_id}"}],
-                [{"text": "🔔 Show All", "callback_data": f"all:{batch_id}"}],
-            ]
-        }
-    else:
-        footer += "\n✅ You've seen all new listings!"
-
-    text = header + "\n\n".join(cards) + footer
-
-    # Guard: truncate if over Telegram's 4096-char limit
-    if len(text) > MAX_MSG_LEN:
-        text = text[: MAX_MSG_LEN - 20] + "\n\n… (truncated)"
-
-    return text, keyboard
-
-
 # ────────────────────────────────────────────────────────────────────
-# Callback query processing
+# Callback query processing (polling fallback)
 # ────────────────────────────────────────────────────────────────────
 def get_pending_callbacks() -> tuple:
     """
@@ -265,7 +146,7 @@ def get_pending_callbacks() -> tuple:
     if not _check_credentials():
         return [], []
 
-    params = {"offset": -1, "limit": 100, "timeout": 0}
+    params = {"offset": 0, "limit": 100, "timeout": 0}
     try:
         resp = requests.get(
             _bot_url("getUpdates"), params=params, timeout=10

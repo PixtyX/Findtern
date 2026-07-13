@@ -59,50 +59,14 @@ MAX_SHOW_ALL = 50
 # ────────────────────────────────────────────────────────────────────
 # Callback processing
 # ────────────────────────────────────────────────────────────────────
-def _process_callbacks():
+def handle_update(update: dict):
     """
-    Fetch pending updates from Telegram and route them.
-    Handles both callback queries (button taps) and text commands (/start, /settings).
+    Process a single Telegram update (used by both webhook and polling).
+    Handles callback queries and text commands in real time.
     """
-    callbacks, text_commands = get_pending_callbacks()
-
-    # ── Process text messages (commands + keyword input) ──
-    for user_id, text in text_commands:
-        # ── Keyword input (non-command text while in keyword mode) ──
-        if not text.startswith("/"):
-            if handle_keyword_input(user_id, text):
-                continue
-            # Not in keyword mode — ignore silently
-            continue
-
-        # ── Bot commands ──
-        cmd = text.split()[0].lower().split("@")[0]  # /start@bot_name → /start
-        if cmd in ("/start", "/settings"):
-            send_dm(user_id,
-                "<b>Welcome to Findtern!</b>\n\n"
-                "Set up your preferences below to get personalized "
-                "internship alerts delivered right here.\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n",
-            )
-            menu_text, kb = build_settings_menu(user_id)
-            send_dm(user_id, menu_text, reply_markup=kb)
-        elif cmd == "/cancel":
-            from preferences import _pending_keyword_user
-            _pending_keyword_user.pop(user_id, None)
-            send_dm(user_id, "✅ Cancelled. Use /settings to configure preferences.")
-        elif cmd == "/help":
-            send_dm(user_id,
-                "<b>Findtern — Commands</b>\n\n"
-                "/start — Set up your preferences\n"
-                "/settings — Change your preferences\n"
-                "/cancel — Cancel keyword entry\n"
-                "/help — Show this message\n\n"
-                "You'll automatically receive personalized "
-                "internship alerts based on your preferences."
-            )
-
-    # ── Process callback queries (button taps) ──
-    for cq in callbacks:
+    # ── Callback queries (button taps) ──
+    cq = update.get("callback_query")
+    if cq:
         cq_id = cq.get("id", "")
         data = cq.get("data", "")
         from_user = cq.get("from", {})
@@ -110,24 +74,81 @@ def _process_callbacks():
 
         if not user_id:
             answer_callback(cq_id, "Error: no user ID")
-            continue
+            return
 
-        # ── Settings callbacks ──
         settings_prefixes = ("settings:", "dept:", "loc:", "remote:", "freq:", "kw:")
         if any(data.startswith(p) for p in settings_prefixes):
             handle_settings_callback(cq_id, user_id, data)
-            continue
+            return
 
-        # ── Job delivery callbacks (per-user digest) ──
         if data.startswith("udmore:"):
             _handle_show_more(cq_id, user_id)
-            continue
+            return
 
         if data.startswith("udall:"):
             _handle_show_all(cq_id, user_id)
-            continue
+            return
 
         answer_callback(cq_id, "Unknown action")
+        return
+
+    # ── Text messages (commands + keyword input) ──
+    msg = update.get("message")
+    if not msg:
+        return
+
+    text = (msg.get("text") or "").strip()
+    from_user = msg.get("from", {})
+    user_id = str(from_user.get("id", ""))
+
+    if not user_id or not text:
+        return
+
+    # Non-command text → keyword input
+    if not text.startswith("/"):
+        handle_keyword_input(user_id, text)
+        return
+
+    # Bot commands
+    cmd = text.split()[0].lower().split("@")[0]
+    if cmd in ("/start", "/settings"):
+        send_dm(user_id,
+            "<b>Welcome to Findtern!</b>\n\n"
+            "Set up your preferences below to get personalized "
+            "internship alerts delivered right here.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n",
+        )
+        menu_text, kb = build_settings_menu(user_id)
+        send_dm(user_id, menu_text, reply_markup=kb)
+    elif cmd == "/cancel":
+        from preferences import _pending_keyword_lock, _pending_keyword_user
+        with _pending_keyword_lock:
+            _pending_keyword_user.pop(user_id, None)
+        send_dm(user_id, "✅ Cancelled. Use /settings to configure preferences.")
+    elif cmd == "/help":
+        send_dm(user_id,
+            "<b>Findtern — Commands</b>\n\n"
+            "/start — Set up your preferences\n"
+            "/settings — Change your preferences\n"
+            "/cancel — Cancel keyword entry\n"
+            "/help — Show this message\n\n"
+            "You'll automatically receive personalized "
+            "internship alerts based on your preferences."
+        )
+
+
+def _process_callbacks():
+    """
+    Fetch pending updates from Telegram via polling and route them.
+    Used by the cron-based flow. The webhook server calls handle_update() directly.
+    """
+    callbacks, text_commands = get_pending_callbacks()
+
+    for user_id, text in text_commands:
+        handle_update({"message": {"text": text, "from": {"id": int(user_id)}}})
+
+    for cq in callbacks:
+        handle_update({"callback_query": cq})
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -298,8 +319,9 @@ def main() -> None:
     # ── 2. Cleanup ──
     cleanup_expired_batches(max_age_hours=48)
 
-    # ── 3. Process callbacks (settings UI + Show More/All) ──
-    _process_callbacks()
+    # ── 3. Process callbacks (only in polling mode — skip when webhook is active) ──
+    if "--with-callbacks" in sys.argv:
+        _process_callbacks()
 
     # ── 4. Fetch new internships ──
     print("[main] Fetching internships…")
@@ -339,6 +361,13 @@ def main() -> None:
 # ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     try:
+        if "--callbacks-only" in sys.argv:
+            # Lightweight mode: just process Telegram interactions (for frequent cron)
+            print("[main] Callbacks-only mode…")
+            init_db()
+            _process_callbacks()
+            print("[main] Callbacks processed.")
+            sys.exit(0)
         main()
     except Exception as exc:
         print(f"[main] FATAL: {exc}")
