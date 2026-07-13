@@ -36,13 +36,23 @@ WEBHOOK_SECRET = os.environ.get(
 
 app = Flask(__name__)
 
-# Track whether startup has already run (gunicorn forks workers)
-_startup_done = False
+# One-time startup flag — DB + webhook + keep-alive
+_started = False
 
 
 # ────────────────────────────────────────────────────────────────────
 # Webhook endpoint — Telegram sends updates here
 # ────────────────────────────────────────────────────────────────────
+@app.before_request
+def _ensure_started():
+    """Guarantee DB schema + webhook registration before first request."""
+    global _started
+    if _started:
+        return
+    _started = True
+    _startup()
+
+
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     """Handle incoming Telegram update."""
@@ -87,22 +97,19 @@ def _keep_alive():
 # Startup — register webhook URL with Telegram
 # ────────────────────────────────────────────────────────────────────
 def _startup():
-    """One-time init: DB schema + webhook registration. Safe to call multiple times."""
-    global _startup_done
-    if _startup_done:
-        return
-    _startup_done = True
-
+    """One-time init: DB schema + webhook registration + keep-alive."""
     if not TELEGRAM_TOKEN:
         print("[bot] ❌ TELEGRAM_TOKEN is not set.")
         return
 
+    print("[bot] Running startup…")
     init_db()
     _register_webhook()
 
     # Start keep-alive thread on Render
     if os.environ.get("RENDER"):
         threading.Thread(target=_keep_alive, daemon=True).start()
+        print("[bot] Keep-alive thread started.")
 
 
 def _register_webhook():
@@ -142,22 +149,10 @@ def _register_webhook():
 
 
 # ────────────────────────────────────────────────────────────────────
-# Gunicorn hook — runs once in the master process before workers fork
-# ────────────────────────────────────────────────────────────────────
-def on_starting(server):
-    """Called just before the master process is initialized."""
-    _startup()
-
-
-def post_fork(server, worker):
-    """Called after a worker has been forked."""
-    _startup()
-
-
-# ────────────────────────────────────────────────────────────────────
-# Entry point (local dev only — production uses gunicorn)
+# Entry point (local dev only — production uses gunicorn + @before_request)
 # ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    _started = True
     _startup()
     port = int(os.environ.get("PORT", 8080))
     print(f"[bot] Starting webhook server on port {port}…")
