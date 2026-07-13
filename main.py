@@ -158,35 +158,17 @@ def _handle_search_now(user_id: str):
 
     send_dm(user_id, "🔍 <b>Searching for internships…</b>")
 
-    # Build a clean, search-friendly query from preferences
+    # Build a broad query — the fetcher will fall back to "internship Malaysia"
+    # if this returns nothing. All the real filtering happens in matches_preferences().
     from preferences import DEPARTMENTS, LOCATIONS
-    query_parts = []
+    query_parts = ["internship"]
 
-    # Use first department's top keyword (not the label — "IT / Tech" confuses APIs)
-    for dept_code in prefs.get("departments", []):
-        dept = DEPARTMENTS.get(dept_code)
-        if dept and dept.get("keywords"):
-            query_parts.append(dept["keywords"][0])  # e.g. "it intern", "marketing"
-            break
-
-    # Add "internship" if not already in the keyword
-    if query_parts and "intern" not in query_parts[0].lower():
-        query_parts[0] = query_parts[0] + " intern"
-
-    if not query_parts:
-        query_parts = ["internship"]
-
-    # Add location city (not full label)
+    # Add first location for better API results
     for loc_code in prefs.get("locations", []):
         loc = LOCATIONS.get(loc_code)
         if loc and loc.get("areas"):
-            query_parts.append(loc["areas"][0])  # e.g. "kuala lumpur", "penang"
+            query_parts.append(loc["areas"][0])  # e.g. "kuala lumpur"
             break
-
-    # Add custom keywords
-    custom_kw = prefs.get("custom_keywords", [])
-    if custom_kw:
-        query_parts.append(custom_kw[0])
 
     query = " ".join(query_parts)
     print(f"[search] User {user_id}: query='{query}'")

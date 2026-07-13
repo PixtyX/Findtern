@@ -68,30 +68,36 @@ def _fetch_jsearch(query: str | None) -> list:
         "X-RapidAPI-Key": api_key,
         "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
     }
-    params = {
-        "query": query or "internship Malaysia",
-        "page": "1",
-        "num_pages": "1",
-        "date_posted": "week",
-    }
 
-    try:
-        resp = requests.get(JSEARCH_URL, headers=headers, params=params, timeout=30)
-        if resp.status_code == 429:
-            print("[fetcher] JSearch 429 rate-limited.")
-            return []
-        if resp.status_code != 200:
-            print(f"[fetcher] JSearch HTTP {resp.status_code}")
-            return []
+    # Try the specific query first, fall back to broad if empty
+    queries_to_try = [q for q in [query, "internship Malaysia"] if q]
+    for q in queries_to_try:
+        params = {
+            "query": q,
+            "page": "1",
+            "num_pages": "1",
+        }
+        print(f"[fetcher] JSearch trying: '{q}'")
 
-        data = resp.json().get("data", [])
-        if not isinstance(data, list):
-            return []
-        return data  # JSearch fields already match our common format
+        try:
+            resp = requests.get(JSEARCH_URL, headers=headers, params=params, timeout=30)
+            if resp.status_code == 429:
+                print("[fetcher] JSearch 429 rate-limited.")
+                return []
+            if resp.status_code != 200:
+                print(f"[fetcher] JSearch HTTP {resp.status_code}")
+                continue  # try next query
 
-    except Exception as exc:
-        print(f"[fetcher] JSearch error: {exc}")
-        return []
+            data = resp.json().get("data", [])
+            if isinstance(data, list) and len(data) > 0:
+                print(f"[fetcher] JSearch got {len(data)} results for '{q}'")
+                return data
+
+        except Exception as exc:
+            print(f"[fetcher] JSearch error: {exc}")
+            continue
+
+    return []
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -104,51 +110,54 @@ def _fetch_adzuna(query: str | None) -> list:
         print("[fetcher] ADZUNA_APP_ID/KEY missing — skipping Adzuna.")
         return []
 
-    # Build Adzuna query from the generic query string
-    search_text = query or "internship"
-    # Extract location hint if present (e.g., "internship Kuala Lumpur" → what=internship, where=Kuala Lumpur)
-    what = search_text
-    where = "Malaysia"
+    # Try specific query first, fall back to broad
+    queries_to_try = [q for q in [query, "internship"] if q]
 
-    params = {
-        "app_id": app_id,
-        "app_key": app_key,
-        "what": what,
-        "where": where,
-        "results_per_page": 30,
-        "max_days_old": 7,
-        "content-type": "application/json",
-    }
+    for q in queries_to_try:
+        params = {
+            "app_id": app_id,
+            "app_key": app_key,
+            "what": q,
+            "where": "Malaysia",
+            "results_per_page": 30,
+            "max_days_old": 30,
+            "content-type": "application/json",
+        }
+        print(f"[fetcher] Adzuna trying: '{q}'")
 
-    try:
-        resp = requests.get(ADZUNA_URL, params=params, timeout=30)
-        if resp.status_code == 429:
-            print("[fetcher] Adzuna 429 rate-limited.")
-            return []
-        if resp.status_code != 200:
-            print(f"[fetcher] Adzuna HTTP {resp.status_code}")
-            return []
+        try:
+            resp = requests.get(ADZUNA_URL, params=params, timeout=30)
+            if resp.status_code == 429:
+                print("[fetcher] Adzuna 429 rate-limited.")
+                return []
+            if resp.status_code != 200:
+                print(f"[fetcher] Adzuna HTTP {resp.status_code}")
+                continue
 
-        data = resp.json().get("results", [])
-        if not isinstance(data, list):
-            return []
+            data = resp.json().get("results", [])
+            if not isinstance(data, list) or len(data) == 0:
+                continue
 
-        # Normalize Adzuna format → common format
-        normalized = []
-        for job in data:
-            loc = job.get("location", {})
-            area = loc.get("area", [])
-            normalized.append({
-                "job_id": f"adzuna_{job.get('id', '')}",
-                "job_title": job.get("title", ""),
-                "employer_name": (job.get("company") or {}).get("display_name", ""),
-                "job_city": area[1] if len(area) > 1 else "",
-                "job_country": area[0] if area else "Malaysia",
-                "job_description": job.get("description", ""),
-                "job_apply_link": job.get("redirect_url", ""),
-            })
-        return normalized
+            print(f"[fetcher] Adzuna got {len(data)} results for '{q}'")
 
-    except Exception as exc:
-        print(f"[fetcher] Adzuna error: {exc}")
-        return []
+            # Normalize Adzuna format → common format
+            normalized = []
+            for job in data:
+                loc = job.get("location", {})
+                area = loc.get("area", [])
+                normalized.append({
+                    "job_id": f"adzuna_{job.get('id', '')}",
+                    "job_title": job.get("title", ""),
+                    "employer_name": (job.get("company") or {}).get("display_name", ""),
+                    "job_city": area[1] if len(area) > 1 else "",
+                    "job_country": area[0] if area else "Malaysia",
+                    "job_description": job.get("description", ""),
+                    "job_apply_link": job.get("redirect_url", ""),
+                })
+            return normalized
+
+        except Exception as exc:
+            print(f"[fetcher] Adzuna error: {exc}")
+            continue
+
+    return []
