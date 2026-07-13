@@ -9,7 +9,6 @@ Subscribe free at: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
 """
 
 import os
-import time
 import requests
 
 # Try both JSearch endpoints — v5 (search-v2) and legacy (search)
@@ -18,37 +17,15 @@ JSEARCH_URLS = [
     "https://jsearch.p.rapidapi.com/search",
 ]
 
-MAX_JOB_AGE_DAYS = 30  # Skip jobs older than this
-
-
-def _filter_by_age(jobs: list) -> list:
-    """Remove jobs older than MAX_JOB_AGE_DAYS."""
-    cutoff = time.time() - (MAX_JOB_AGE_DAYS * 86400)
-    filtered = []
-    for job in jobs:
-        ts = job.get("job_posted_at_timestamp")
-        if ts and ts < cutoff:
-            continue  # too old
-        # Also check the datetime string as fallback
-        posted_str = job.get("job_posted_at", "")
-        if "month" in posted_str.lower() or "year" in posted_str.lower():
-            continue  # "2 months ago" etc = too old
-        filtered.append(job)
-    removed = len(jobs) - len(filtered)
-    if removed:
-        print(f"[fetcher] Filtered out {removed} jobs older than {MAX_JOB_AGE_DAYS} days")
-    return filtered
-
 
 def fetch_internships(query: str | None = None) -> list:
     """
     Fetch internship listings. Tries specific query first, falls back to broad.
-    Returns list of job dicts (filtered to remove jobs older than 30 days).
+    Returns list of job dicts.
     """
     jobs, error = _fetch_jsearch(query)
     if error:
         print(f"[fetcher] {error}")
-    jobs = _filter_by_age(jobs)
     print(f"[fetcher] Total jobs: {len(jobs)}")
     return jobs
 
@@ -110,8 +87,7 @@ def fetch_multi_query(queries: list[str]) -> tuple:
         if all_jobs:
             break  # got results from this endpoint, skip others
 
-    all_jobs = _filter_by_age(all_jobs)
-    print(f"[fetcher] Multi-query total: {len(all_jobs)} unique jobs (after age filter)")
+    print(f"[fetcher] Multi-query total: {len(all_jobs)} unique jobs")
     return all_jobs, last_error if not all_jobs else ""
 
 

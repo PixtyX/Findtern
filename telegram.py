@@ -125,20 +125,11 @@ def build_job_card(job: dict) -> str:
     if link and not link.startswith(("https://", "http://")):
         link = ""
 
-    # Posting date — show "Posted X days ago" or the raw string
-    posted = job.get("job_posted_at", "")
-    if not posted and job.get("job_posted_at_timestamp"):
-        import time
-        days_ago = int((time.time() - job["job_posted_at_timestamp"]) / 86400)
-        posted = f"{days_ago} day{'s' if days_ago != 1 else ''} ago"
-
     lines = [
         f"<b>{title}</b>",
         f"<b>Company:</b> {company}",
         f"<b>Location:</b> {location}",
     ]
-    if posted:
-        lines.append(f"<b>Posted:</b> {escape_html(posted)}")
     if link:
         lines.append(f'<a href="{link}">Apply Here</a>')
     return "\n".join(lines)
