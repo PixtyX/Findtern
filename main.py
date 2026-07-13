@@ -39,6 +39,7 @@ from fetcher import fetch_internships
 from telegram import (
     send_dm,
     build_job_card,
+    escape_html,
     get_pending_callbacks,
     answer_callback,
 )
@@ -190,9 +191,41 @@ def _handle_search_now(user_id: str):
     query = " ".join(query_parts)
     print(f"[search] User {user_id}: query='{query}'")
 
-    raw_jobs = fetch_internships(query=query)
+    # Fetch from each source separately so we can report what happened
+    from fetcher import _fetch_jsearch, _fetch_adzuna
+
+    jsearch_jobs = _fetch_jsearch(query)
+    adzuna_jobs = _fetch_adzuna(query)
+
+    # Build status for the user
+    source_lines = []
+    if os.environ.get("RAPIDAPI_KEY"):
+        source_lines.append(f"JSearch: {len(jsearch_jobs)} results")
+    else:
+        source_lines.append("JSearch: ⚠️ API key not configured")
+    if os.environ.get("ADZUNA_APP_ID") and os.environ.get("ADZUNA_APP_KEY"):
+        source_lines.append(f"Adzuna: {len(adzuna_jobs)} results")
+    else:
+        source_lines.append("Adzuna: ⚠️ API key not configured")
+    print(f"[search] Sources — {'; '.join(source_lines)}")
+
+    # Combine and deduplicate
+    seen = set()
+    raw_jobs = []
+    for job in jsearch_jobs + adzuna_jobs:
+        key = f"{job.get('job_title', '').lower()}|{job.get('employer_name', '').lower()}"
+        if key not in seen:
+            seen.add(key)
+            raw_jobs.append(job)
+
     if not raw_jobs:
-        send_dm(user_id, "😕 No internships found right now. Try again later or adjust your preferences with /settings.")
+        status = "\n".join(f"  • {s}" for s in source_lines)
+        send_dm(user_id,
+            f"😕 <b>No internships found.</b>\n\n"
+            f"<b>Query:</b> <code>{escape_html(query)}</code>\n\n"
+            f"<b>Source status:</b>\n{status}\n\n"
+            "Check /settings to adjust your preferences, or try again later."
+        )
         return
 
     # Filter by preferences
