@@ -11,10 +11,10 @@ Subscribe free at: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
 import os
 import requests
 
-# Try both JSearch endpoints — regular and Mega
+# Try both JSearch endpoints — v5 (search-v2) and legacy (search)
 JSEARCH_URLS = [
+    "https://jsearch.p.rapidapi.com/search-v2",
     "https://jsearch.p.rapidapi.com/search",
-    "https://jsearch-mega.p.rapidapi.com/search",
 ]
 
 
@@ -55,7 +55,7 @@ def _fetch_jsearch(query: str | None) -> tuple:
         }
 
         for q in queries_to_try:
-            params = {"query": q, "page": "1", "num_pages": "1"}
+            params = {"query": q, "page": "1", "num_pages": "1", "country": "my", "date_posted": "all"}
             print(f"[fetcher] JSearch ({host}) trying: '{q}'")
 
             try:
