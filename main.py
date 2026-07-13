@@ -28,6 +28,7 @@ from database import (
     mark_job_as_sent,
     cleanup_expired_batches,
     get_all_active_users,
+    get_user_preference,
     create_user_digest,
     pop_user_digest_jobs,
     has_user_digest_jobs,
@@ -125,16 +126,116 @@ def handle_update(update: dict):
         with _pending_keyword_lock:
             _pending_keyword_user.pop(user_id, None)
         send_dm(user_id, "✅ Cancelled. Use /settings to configure preferences.")
+    elif cmd == "/search":
+        _handle_search_now(user_id)
     elif cmd == "/help":
         send_dm(user_id,
             "<b>Findtern — Commands</b>\n\n"
             "/start — Set up your preferences\n"
             "/settings — Change your preferences\n"
+            "/search — Search for internships right now\n"
             "/cancel — Cancel keyword entry\n"
             "/help — Show this message\n\n"
             "You'll automatically receive personalized "
             "internship alerts based on your preferences."
         )
+
+
+def _handle_search_now(user_id: str):
+    """
+    Instant search: fetch jobs now, filter by user's preferences,
+    and deliver matching ones immediately.
+    """
+    prefs = get_user_preference(user_id)
+    if not prefs or (not prefs.get("departments") and not prefs.get("custom_keywords")):
+        send_dm(user_id,
+            "⚠️ <b>Set your preferences first!</b>\n\n"
+            "Use /start to pick departments, locations, and keywords "
+            "so I know what to search for."
+        )
+        return
+
+    send_dm(user_id, "🔍 <b>Searching for internships…</b>")
+
+    # Build a smarter query from user preferences
+    from preferences import DEPARTMENTS, LOCATIONS
+    query_parts = ["internship"]
+
+    # Add department keywords
+    for dept_code in prefs.get("departments", []):
+        dept = DEPARTMENTS.get(dept_code)
+        if dept:
+            query_parts.append(dept["label"])
+            break  # use first department to keep query focused
+
+    # Add location
+    for loc_code in prefs.get("locations", []):
+        loc = LOCATIONS.get(loc_code)
+        if loc:
+            query_parts.append(loc["label"])
+            break
+
+    # Add custom keywords
+    custom_kw = prefs.get("custom_keywords", [])
+    if custom_kw:
+        query_parts.append(custom_kw[0])
+
+    query = " ".join(query_parts)
+    print(f"[search] User {user_id}: querying '{query}'")
+
+    raw_jobs = fetch_internships(query=query)
+    if not raw_jobs:
+        send_dm(user_id, "😕 No internships found right now. Try again later or adjust your preferences with /settings.")
+        return
+
+    # Filter by preferences
+    matched = [job for job in raw_jobs if matches_preferences(job, prefs)]
+
+    # Deduplicate against already-seen jobs
+    new_matched = []
+    for job in matched:
+        job_id = job.get("job_id", "") or ""
+        if job_id and is_job_new(job_id):
+            new_matched.append(job)
+            mark_job_as_sent(job_id=job_id, title=job.get("job_title", ""),
+                             company=job.get("employer_name", ""), link=job.get("job_apply_link", "") or "")
+
+    if not new_matched:
+        send_dm(user_id,
+            "😕 <b>No new internships found.</b>\n\n"
+            "All matching listings were already sent to you. "
+            "Try adding more departments or keywords with /settings."
+        )
+        return
+
+    # Store in digest and deliver first batch
+    create_user_digest(user_id, new_matched)
+    first_batch = pop_user_digest_jobs(user_id, count=BATCH_SIZE)
+    total = len(new_matched)
+    remaining = total - len(first_batch)
+
+    header = f"<b>🔍 {total} Internship{'s' if total != 1 else ''} Found!</b>\n\n"
+    cards = [build_job_card(job) for job in first_batch]
+    footer = "\n━━━━━━━━━━━━━━━━━━━━\n"
+    keyboard = None
+
+    if remaining > 0:
+        footer += f"\n{remaining} more available. Tap below:"
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "Show More", "callback_data": f"udmore:{user_id}"}],
+                [{"text": "Show All", "callback_data": f"udall:{user_id}"}],
+            ]
+        }
+    else:
+        footer += "\nThat's all!"
+
+    text = header + "\n\n".join(cards) + footer
+    if len(text) > 4096:
+        text = text[:4076] + "\n\n… (truncated)"
+
+    send_dm(user_id, text, reply_markup=keyboard)
+    print(f"[search] User {user_id}: delivered {len(first_batch)}/{total} jobs.")
 
 
 def _process_callbacks():

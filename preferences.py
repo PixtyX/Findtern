@@ -271,6 +271,9 @@ def build_settings_menu(user_id: str) -> tuple:
     keyboard = {
         "inline_keyboard": [
             [
+                {"text": "🔍 Search Now", "callback_data": "settings:search"},
+            ],
+            [
                 {"text": "Departments", "callback_data": "settings:dept"},
                 {"text": "Locations", "callback_data": "settings:loc"},
             ],
@@ -448,6 +451,12 @@ def handle_settings_callback(cq_id: str, user_id: str, data: str) -> bool:
         if value == "done":
             answer_callback(cq_id, "✅ Preferences saved!")
             send_dm(user_id, "✅ <b>Findtern — Preferences saved!</b>\nYour personalized internship feed is now active.")
+            return True
+        if value == "search":
+            answer_callback(cq_id, "🔍 Searching…")
+            # Import at call time to avoid circular import
+            import main as _main
+            _main._handle_search_now(user_id)
             return True
         text, kb = {"dept": build_dept_keyboard, "loc": build_loc_keyboard,
                      "remote": build_remote_keyboard, "freq": build_freq_keyboard,

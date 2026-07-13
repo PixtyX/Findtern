@@ -11,9 +11,12 @@ import requests
 RAPIDAPI_URL = "https://jsearch.p.rapidapi.com/search"
 
 
-def fetch_internships() -> list:
+def fetch_internships(query: str | None = None) -> list:
     """
-    Fetch IT internship listings for Malaysia via RapidAPI JSearch.
+    Fetch internship listings via RapidAPI JSearch.
+
+    Args:
+        query: Custom search query. Defaults to "Internship in Malaysia".
 
     Returns a list of job dicts on success, or an empty list on any failure.
     Handles 429 (rate-limit) explicitly so the caller can exit gracefully.
@@ -27,7 +30,7 @@ def fetch_internships() -> list:
         "X-RapidAPI-Key": api_key,
         "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
     }
-    params = {"query": "IT Internship in Malaysia", "page": "1", "num_pages": "1"}
+    params = {"query": query or "Internship in Malaysia", "page": "1", "num_pages": "1"}
 
     try:
         response = requests.get(RAPIDAPI_URL, headers=headers, params=params, timeout=30)
