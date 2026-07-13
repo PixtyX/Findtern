@@ -39,7 +39,8 @@ def fetch_internships() -> list:
 
         # --- Generic non-2xx guard ---
         if response.status_code != 200:
-            print(f"[fetcher] Unexpected HTTP {response.status_code}: {response.text[:300]}")
+            # Never log response body — may contain echoed API key
+            print(f"[fetcher] Unexpected HTTP {response.status_code}")
             return []
 
         payload = response.json()

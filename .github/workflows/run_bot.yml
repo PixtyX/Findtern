@@ -34,7 +34,6 @@ jobs:
       - name: Run main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python main.py
