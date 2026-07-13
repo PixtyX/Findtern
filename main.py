@@ -59,6 +59,17 @@ MAX_SHOW_ALL = 50
 
 
 # ────────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────────
+def _get_freq_label(user_id: str) -> str:
+    """Return a human-readable frequency label for a user's preference."""
+    from preferences import FREQ_OPTIONS
+    prefs = get_user_preference(user_id)
+    freq = prefs.get("notify_frequency", "6h") if prefs else "6h"
+    return FREQ_OPTIONS.get(freq, FREQ_OPTIONS["6h"])["label"].lower()
+
+
+# ────────────────────────────────────────────────────────────────────
 # Callback processing
 # ────────────────────────────────────────────────────────────────────
 def handle_update(update: dict):
@@ -323,10 +334,11 @@ def _handle_show_more(cq_id: str, user_id: str):
         answer_callback(cq_id, f"Sent {len(jobs)} — more available")
     else:
         answer_callback(cq_id, f"Sent {len(jobs)} — that's all")
+        freq_label = _get_freq_label(user_id)
         send_dm(user_id,
             "✅ <b>Findtern — All caught up!</b>\n\n"
             "You've seen all new listings for this round.\n"
-            "New jobs are checked every 6 hours. You'll get a DM "
+            f"New jobs are checked {freq_label}. You'll get a DM "
             "when something matching your preferences appears.\n\n"
             "Use /settings to change your preferences anytime."
         )
@@ -350,9 +362,10 @@ def _handle_show_all(cq_id: str, user_id: str):
             total_sent += 1
 
     answer_callback(cq_id, f"✅ Delivered {total_sent} listing(s)!")
+    freq_label = _get_freq_label(user_id)
     send_dm(user_id,
         "✅ <b>Findtern — All listings delivered!</b>\n\n"
-        "New jobs are checked every 6 hours. Use /settings anytime."
+        f"New jobs are checked {freq_label}. Use /settings anytime."
     )
 
 
