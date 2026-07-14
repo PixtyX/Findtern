@@ -2,8 +2,8 @@ name: Run Internship Bot
 
 on:
   workflow_dispatch: # Manual trigger
-  # schedule:
-  #   - cron: "0 */6 * * *" # Every 6 hours (UTC) — DISABLED: was failing repeatedly
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours (UTC)
 
 jobs:
   aggregate:

@@ -57,7 +57,7 @@ def _release_connection(conn):
 # Schema bootstrap
 # ────────────────────────────────────────────────────────────────────
 def init_db():
-    """Create all tables if they do not exist."""
+    """Create all tables if they do not exist and apply incremental migrations."""
     conn = None
     cur = None
     try:
@@ -68,6 +68,21 @@ def init_db():
         cur.execute(PENDING_CALLBACKS_DDL)
         cur.execute(USER_PREFERENCES_DDL)
         cur.execute(USER_DIGESTS_DDL)
+
+        # --- Incremental migrations for existing tables ---
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'user_preferences'
+                      AND column_name = 'last_digest_at'
+                ) THEN
+                    ALTER TABLE user_preferences ADD COLUMN last_digest_at TIMESTAMP;
+                END IF;
+            END $$;
+        """)
+
         conn.commit()
     finally:
         if cur is not None:
