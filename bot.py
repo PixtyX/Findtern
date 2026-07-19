@@ -82,14 +82,39 @@ def health():
 # Keep-alive — prevents Render free tier from spinning down
 # ────────────────────────────────────────────────────────────────────
 def _keep_alive():
-    """Ping own health endpoint every 14 minutes to prevent spin-down."""
+    """Ping own health endpoint every 14 minutes to prevent spin-down.
+
+    Uses the external URL when available so the request counts as real
+    external traffic (Render free-tier only stays awake on external hits).
+    Falls back to localhost if no external URL is set.
+    """
     time.sleep(60)  # wait for server to start
+
+    # Build the URL to ping — prefer external URL so Render sees real traffic
+    base_url = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        or os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        or (f"https://{os.environ['FLY_APP_NAME']}.fly.dev" if os.environ.get("FLY_APP_NAME") else None)
+        or os.environ.get("PUBLIC_URL")
+        or ""
+    )
+    if base_url and not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+
+    if base_url:
+        ping_url = f"{base_url}/"
+        print(f"[keep-alive] Pinging external URL: {ping_url}")
+    else:
+        port = int(os.environ.get("PORT", 8080))
+        ping_url = f"http://127.0.0.1:{port}/"
+        print(f"[keep-alive] No external URL found, pinging localhost: {ping_url}")
+
     while True:
         try:
-            port = int(os.environ.get("PORT", 8080))
-            http_requests.get(f"http://127.0.0.1:{port}/", timeout=10)
-        except Exception:
-            pass
+            resp = http_requests.get(ping_url, timeout=10)
+            print(f"[keep-alive] Ping {resp.status_code}")
+        except Exception as exc:
+            print(f"[keep-alive] Ping failed: {exc}")
         time.sleep(14 * 60)
 
 
