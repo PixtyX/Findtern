@@ -18,6 +18,7 @@ Design principles:
 
 import os
 import sys
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -56,6 +57,20 @@ from preferences import (
 # ---------------------------------------------------------------------------
 BATCH_SIZE = 5
 MAX_SHOW_ALL = 50
+
+# ---------------------------------------------------------------------------
+# Per-user search lock — prevents duplicate searches on rapid button presses
+# ---------------------------------------------------------------------------
+_search_locks: dict[str, threading.Lock] = {}
+_search_locks_guard = threading.Lock()
+
+
+def _get_search_lock(user_id: str) -> threading.Lock:
+    """Return (and lazily create) a per-user lock for search deduplication."""
+    with _search_locks_guard:
+        if user_id not in _search_locks:
+            _search_locks[user_id] = threading.Lock()
+        return _search_locks[user_id]
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -158,6 +173,20 @@ def _handle_search_now(user_id: str):
     Instant search: fetch jobs now, filter by user's preferences,
     and deliver matching ones immediately.
     """
+    lock = _get_search_lock(user_id)
+    acquired = lock.acquire(timeout=0)  # non-blocking
+    if not acquired:
+        send_dm(user_id, "⏳ <b>Search already in progress…</b>\n\nPlease wait for it to finish.")
+        return
+
+    try:
+        _handle_search_now_inner(user_id)
+    finally:
+        lock.release()
+
+
+def _handle_search_now_inner(user_id: str):
+    """Actual search logic — only runs under the per-user lock."""
     prefs = get_user_preference(user_id)
     if not prefs or (not prefs.get("departments") and not prefs.get("custom_keywords")):
         send_dm(user_id,

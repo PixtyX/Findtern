@@ -39,6 +39,10 @@ app = Flask(__name__)
 # One-time startup flag — DB + webhook + keep-alive
 _started = False
 
+# Deduplicate Telegram retries — same update_id must not be processed twice
+_seen_update_ids: set[int] = set()
+_seen_update_ids_lock = threading.Lock()
+
 
 # ────────────────────────────────────────────────────────────────────
 # Webhook endpoint — Telegram sends updates here
@@ -55,13 +59,32 @@ def _ensure_started():
 
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
-    """Handle incoming Telegram update."""
+    """Handle incoming Telegram update.
+
+    Returns 200 immediately and processes the update in a background thread
+    so Telegram doesn't retry the callback while we're still working.
+    Also deduplicates by update_id to ignore any retries that slip through.
+    """
     try:
         update = request.get_json(force=True, silent=True)
         if not update:
             return jsonify({"error": "invalid json"}), 400
 
-        handle_update(update)
+        # Deduplicate by update_id — Telegram retries if response is slow
+        update_id = update.get("update_id", 0)
+        if update_id:
+            with _seen_update_ids_lock:
+                if update_id in _seen_update_ids:
+                    print(f"[webhook] Skipping duplicate update_id={update_id}")
+                    return jsonify({"ok": True})
+                _seen_update_ids.add(update_id)
+                # Prevent unbounded growth — evict oldest half when too large
+                if len(_seen_update_ids) > 10_000:
+                    keep = sorted(_seen_update_ids)[-5000:]
+                    _seen_update_ids = set(keep)
+
+        # Process in background so the webhook responds instantly
+        threading.Thread(target=handle_update, args=(update,), daemon=True).start()
         return jsonify({"ok": True})
 
     except Exception as exc:
