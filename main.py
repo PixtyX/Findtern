@@ -36,7 +36,7 @@ from database import (
     get_user_last_digest,
     update_user_last_digest,
 )
-from fetcher import fetch_internships
+from fetcher import fetch_internships, fetch_cron_round
 from telegram import (
     send_dm,
     build_job_card,
@@ -510,9 +510,9 @@ def main() -> None:
     if "--with-callbacks" in sys.argv:
         _process_callbacks()
 
-    # ── 4. Fetch new internships ──
-    print("[main] Fetching internships…")
-    raw_jobs = fetch_internships()
+    # ── 4. Fetch new internships (diverse queries + page rotation) ──
+    print("[main] Fetching internships (cron round)…")
+    raw_jobs = fetch_cron_round()
     if not raw_jobs:
         print("[main] No jobs returned from API. Exiting.")
         sys.exit(0)
