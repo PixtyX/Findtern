@@ -73,6 +73,7 @@ def webhook():
         # Deduplicate by update_id — Telegram retries if response is slow
         update_id = update.get("update_id", 0)
         if update_id:
+            global _seen_update_ids
             with _seen_update_ids_lock:
                 if update_id in _seen_update_ids:
                     print(f"[webhook] Skipping duplicate update_id={update_id}")
@@ -84,7 +85,13 @@ def webhook():
                     _seen_update_ids = set(keep)
 
         # Process in background so the webhook responds instantly
-        threading.Thread(target=handle_update, args=(update,), daemon=True).start()
+        def _process():
+            try:
+                handle_update(update)
+            except Exception as exc:
+                print(f"[webhook] Error in background handler: {exc}")
+
+        threading.Thread(target=_process, daemon=True).start()
         return jsonify({"ok": True})
 
     except Exception as exc:
