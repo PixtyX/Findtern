@@ -1,6 +1,6 @@
 # Findtern
 
-A Telegram bot that finds internship listings tailored to you and delivers them straight to your DMs. It searches across LinkedIn, Indeed, Glassdoor, and other major job boards in real time.
+A Telegram bot that finds Malaysian internship listings tailored to you and delivers them straight to your DMs. It searches across LinkedIn, Indeed, Glassdoor, and other major job boards in real time.
 
 ## What It Does
 
